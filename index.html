@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="bower_components/Cesium-1.11/Build/Cesium/Widgets/widgets.css">
+    <style type="text/css">
+
+    #map {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+    }
+
+    #select {
+        width: 100px;
+        padding: 10px;
+        background: #fff;
+        position: absolute;
+        left: 10px;
+        top: 10px;
+        z-index: 1000;
+    }
+
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="select">
+    <h4>Fjell</h4>
+    <select></select>
+</div>
+
+
+
+<script type="text/javascript" src="bower_components/jquery/dist/jquery.min.js"></script>
+<script type="text/javascript" src="bower_components/underscore/underscore-min.js"></script>
+<script type="text/javascript" src="bower_components/Cesium-1.11/Build/Cesium/Cesium.js"></script>
+
+<script type="text/javascript" src="src/cartodb.js"></script>
+
+<script type="text/javascript">
+
+
+    function getMountains(callback) {
+        var api = new CartodbAPI('atlefren', '30032b111521b4ed03b4d81e069fa28568bfaa5b');
+
+        var dataset = {
+            table: 'mountains'
+        };
+        api.getData(dataset, callback);
+    }
+
+    function buildSelect(mountains, callback) {
+
+        var select = $('#select select');
+
+        var options = _.map(mountains.features, function (feature) {
+            return $('<option value="' + feature.properties.cartodb_id + '">' + feature.properties.snavn + '</option>');
+        });
+
+        select.append(options);
+
+        select.on('change', function () {
+            var val = parseInt(select.val(), 10);
+            var feature = _.find(mountains.features, function (feature) {
+                return feature.properties.cartodb_id === val;
+            })
+            callback(feature);
+        });
+    }
+
+    function CesiumMap (div, bbox, options) {
+        options = options || {};
+        var cesiumViewerOpts = _.extend({
+            animation: false,
+            baseLayerPicker: false,
+            fullscreenButton: false,
+            geocoder: false,
+            homeButton: false,
+            infoBox: false,
+            sceneModePicker: false,
+            selectionIndicator: false,
+            timeline: false,
+            navigationHelpButton: false,
+            navigationInstructionsInitiallyVisible: false,
+            orderIndependentTranslucency: false
+        }, options);
+
+        var viewer = new Cesium.Viewer(div, cesiumViewerOpts);
+//        viewer.scene.imageryLayers.removeAll();
+        var scene = viewer.scene;
+        var globe = scene.globe;
+
+        globe.enableLighting = true;
+        globe.depthTestAgainstTerrain = true;
+
+
+        var terrain = new Cesium.CesiumTerrainProvider({
+            url : '//assets.agi.com/stk-terrain/world',
+            requestVertexNormals : true,
+            requestWaterMask: false
+        });
+        viewer.terrainProvider = terrain;
+
+        var topo2 = new Cesium.WebMapTileServiceImageryProvider({
+            url : 'http://opencache.statkart.no/gatekeeper/gk/gk.open_wmts?SERVICE=WMTS&REQUEST=GetTile&LAYER=topo2&STYLE={Style}&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{TileMatrix}&TILEROW={TileRow}&TILECOL={TileCol}&FORMAT=image/png',
+            layer : '',
+            tileMatrixSetID : 'EPSG:3857',
+            style : 'default',
+            version : '1.0.0',
+            format : 'image/png',
+            maximumLevel: 19
+        });
+        //viewer.imageryLayers.addImageryProvider(topo2);
+
+
+        var bounds = bbox.split(',').map(parseFloat);
+        var ellipsoid = Cesium.Ellipsoid.WGS84;
+        var extent = new Cesium.Rectangle(
+            Cesium.Math.toRadians(bounds[0]),
+            Cesium.Math.toRadians(bounds[1]),
+            Cesium.Math.toRadians(bounds[2]),
+            Cesium.Math.toRadians(bounds[3])
+        );
+        scene.camera.viewRectangle(extent, ellipsoid);
+
+        function setView(lat, lon) {
+            console.log(lat, lon);
+            scene.camera.setView({
+                position: Cesium.Cartesian3.fromDegrees(lon, lat, 100),
+                heading: Cesium.Math.toRadians(0.0),
+                pitch: Cesium.Math.toRadians(0.0),
+                roll: 0.0
+            });
+        }
+
+
+        return {
+            viewer: viewer,
+            setView: setView
+        };
+    }
+
+
+    (function (ns) {
+        'use strict';
+
+        var bbox = '3.779297,57.751076,31.464844,71.357067';
+        var map = CesiumMap('map', bbox);
+
+        getMountains(function (mountains) {
+            buildSelect(mountains, function (mountain) {
+                console.log(mountain);
+
+                var lon = mountain.geometry.coordinates[0];
+                var lat = mountain.geometry.coordinates[1];
+                map.setView(lat, lon);
+            });
+        });
+
+    }());
+</script>
+
+</body>
+</html>

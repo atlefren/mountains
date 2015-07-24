@@ -3,24 +3,26 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
     <link rel="stylesheet" type="text/css" href="bower_components/Cesium-1.11/Build/Cesium/Widgets/widgets.css">
     <style type="text/css">
 
     #map {
         position: absolute;
-        top: 0;
+        top: 75px;
         right: 0;
         bottom: 0;
         left: 0;
     }
 
-    #select {
-        width: 100px;
+    #banner {
+        right: 0;
         padding: 10px;
         background: #fff;
         position: absolute;
-        left: 10px;
-        top: 10px;
+        left: 0;
+        height: 75px;
+        top: 0;
         z-index: 1000;
     }
 
@@ -30,9 +32,18 @@
 
 <div id="map"></div>
 
-<div id="select">
-    <h4>Fjell</h4>
-    <select></select>
+<div id="banner">
+    <div class="row">
+        <div id="select" class="col-md-4">
+            <h4>Fjell</h4>
+            <select>
+                <option value="">..</option>
+            </select>
+        </div>
+        <div class="col-md-8">
+            <h1 id="name"></h1>
+        </div>
+    </div>
 </div>
 
 
@@ -50,7 +61,8 @@
         var api = new CartodbAPI('atlefren', '30032b111521b4ed03b4d81e069fa28568bfaa5b');
 
         var dataset = {
-            table: 'mountains'
+            table: 'mountains',
+            columns: ['cartodb_id as id', 'snavn as title', 'ST_AsGeoJSON(the_geom) as geom']
         };
         api.getData(dataset, callback);
     }
@@ -60,7 +72,7 @@
         var select = $('#select select');
 
         var options = _.map(mountains.features, function (feature) {
-            return $('<option value="' + feature.properties.cartodb_id + '">' + feature.properties.snavn + '</option>');
+            return $('<option value="' + feature.properties.id + '">' + feature.properties.title + '</option>');
         });
 
         select.append(options);
@@ -68,9 +80,14 @@
         select.on('change', function () {
             var val = parseInt(select.val(), 10);
             var feature = _.find(mountains.features, function (feature) {
-                return feature.properties.cartodb_id === val;
+                return feature.properties.id === val;
             })
             callback(feature);
+            if (feature) {
+                $('#name').html(feature.properties.title);
+            } else {
+                $('#name').html('');
+            }
         });
     }
 
@@ -92,12 +109,42 @@
         }, options);
 
         var viewer = new Cesium.Viewer(div, cesiumViewerOpts);
-//        viewer.scene.imageryLayers.removeAll();
+        viewer.scene.imageryLayers.removeAll();
         var scene = viewer.scene;
         var globe = scene.globe;
 
         globe.enableLighting = true;
         globe.depthTestAgainstTerrain = true;
+
+        // disable the default event handlers
+        scene.screenSpaceCameraController.enableRotate = false;
+        scene.screenSpaceCameraController.enableTranslate = false;
+        scene.screenSpaceCameraController.enableZoom = false;
+        scene.screenSpaceCameraController.enableTilt = false;
+        scene.screenSpaceCameraController.enableLook = false;
+
+        var camera = viewer.camera;
+        $(document).keypress(function(e) {
+            var heading = Cesium.Math.toDegrees(camera.heading);
+            var pitch = Cesium.Math.toDegrees(camera.pitch);
+            if (e.keyCode === 39) { //right
+                heading = heading + 1;
+            }
+            if (e.keyCode === 37) { //left
+                heading = heading - 1;
+            }
+            if (e.keyCode === 40) { //down
+                pitch = pitch - 1;
+            }
+            if (e.keyCode === 38) { //up
+                pitch = pitch + 1;
+            }
+            camera.setView({
+                heading : Cesium.Math.toRadians(heading),
+                pitch : Cesium.Math.toRadians(pitch)
+            });
+
+        });
 
 
         var terrain = new Cesium.CesiumTerrainProvider({
@@ -116,7 +163,7 @@
             format : 'image/png',
             maximumLevel: 19
         });
-        //viewer.imageryLayers.addImageryProvider(topo2);
+        viewer.imageryLayers.addImageryProvider(topo2);
 
 
         var bounds = bbox.split(',').map(parseFloat);
@@ -129,10 +176,10 @@
         );
         scene.camera.viewRectangle(extent, ellipsoid);
 
+
         function setView(lat, lon) {
-            console.log(lat, lon);
             scene.camera.setView({
-                position: Cesium.Cartesian3.fromDegrees(lon, lat, 100),
+                position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
                 heading: Cesium.Math.toRadians(0.0),
                 pitch: Cesium.Math.toRadians(0.0),
                 roll: 0.0
@@ -140,9 +187,51 @@
         }
 
 
+        function _getHeightsForGeoJsonPoints(geojson, callback, zoomLevel, extraHeight) {
+            zoomLevel = zoomLevel || 14;
+            var allCoordinates = [];
+            if (!extraHeight) {
+                extraHeight = 0;
+            }
+            _.each(geojson.features, function (feature) {
+                var fgeom = feature.geometry.coordinates;
+                allCoordinates.push(new Cesium.Cartographic.fromDegrees(fgeom[0], fgeom[1]));
+            });
+
+            var promise = Cesium.sampleTerrain(
+                viewer.terrainProvider,
+                zoomLevel,
+                allCoordinates
+            );
+            Cesium.when(promise, function (updatedPositions) {
+                var allCoordinatesHeight = updatedPositions;
+                _.each(geojson.features, function (feature, count) {
+                    var newCoor = allCoordinatesHeight[count];
+                    feature.geometry.coordinates = [
+                        Cesium.Math.toDegrees(newCoor.longitude),
+                        Cesium.Math.toDegrees(newCoor.latitude),
+                        newCoor.height + extraHeight
+                    ];
+                });
+                callback(geojson);
+            });
+        }
+
+        function addGeoJsonMarkers(geoJson) {
+            _getHeightsForGeoJsonPoints(geoJson, function (data) {
+                var dataSource = Cesium.GeoJsonDataSource.load(data);
+                viewer.dataSources.add(dataSource);
+            });
+        }
+
+
         return {
+            reset: function () {
+                scene.camera.viewRectangle(extent, ellipsoid);
+            },
             viewer: viewer,
-            setView: setView
+            setView: setView,
+            addGeoJsonMarkers: addGeoJsonMarkers
         };
     }
 
@@ -154,13 +243,20 @@
         var map = CesiumMap('map', bbox);
 
         getMountains(function (mountains) {
+            map.addGeoJsonMarkers(mountains);
             buildSelect(mountains, function (mountain) {
-                console.log(mountain);
+                if (!mountain) {
+                    map.reset();
+                    return;
+                }
 
                 var lon = mountain.geometry.coordinates[0];
                 var lat = mountain.geometry.coordinates[1];
                 map.setView(lat, lon);
+                $('#select select').blur()
             });
+
+
         });
 
     }());

@@ -185,12 +185,15 @@ var CartodbAPI = function (user, apikey) {
         if (dataset.query) {
             sql = dataset.query;
         } else if (dataset.table) {
-            var select = ['*'];
+            var columns = dataset.columns;
             if (_.has(columnList, dataset.table)) {
-                select = _.keys(columnList[dataset.table]);
+                columns = _.keys(columnList[dataset.table]);
             }
-            select.push('ST_AsGeoJSON(the_geom) as geom');
-            sql = 'SELECT ' + select.join(', ') + ' FROM ' + dataset.table;
+            if (!columns) {
+                columns = ['*'];
+            }
+            columns.push('ST_AsGeoJSON(the_geom) as geom');
+            sql = 'SELECT ' + columns.join(', ') + ' FROM ' + dataset.table;
         } else if (dataset.county) {
             sql = _createSelect(
                 'ST_AsGeoJSON(the_geom) as geom',
